@@ -1,0 +1,598 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Заголовок страницы -->
+    <div class="row mb-4">
+        <div class="col-12 d-flex justify-content-between align-items-center">
+            <div>
+                <h2 class="mb-0">Дашборд мониторинга производства</h2>
+                <p class="text-muted">Система мониторинга производства ПЭТ бутылок в реальном времени</p>
+            </div>
+            <div id="connection-status-badge">
+                <span class="badge bg-secondary">Подключение...</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Карточки ключевых метрик -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-white-50">Активных датчиков</h6>
+                            <h2 id="active-sensors-count">-</h2>
+                        </div>
+                        <i class="fas fa-microchip fa-2x text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-white-50">Статус системы</h6>
+                            <h2 id="system-status">-</h2>
+                        </div>
+                        <i class="fas fa-check-circle fa-2x text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-white-50">Оповещений за 24ч</h6>
+                            <h2 id="alerts-count">-</h2>
+                        </div>
+                        <i class="fas fa-bell fa-2x text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h6 class="text-white-50">Обновлено</h6>
+                            <h2 id="last-update-time">-</h2>
+                        </div>
+                        <i class="fas fa-clock fa-2x text-white-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Основной контент дашборда -->
+    <div class="row">
+        <!-- Левая колонка: Участки производства -->
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-industry me-2"></i>Текущий статус производства</span>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-outline-secondary">За час</button>
+                        <button class="btn btn-sm btn-outline-secondary active">За день</button>
+                        <button class="btn btn-sm btn-outline-secondary">За неделю</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="row" id="production-status">
+                        <p>Загрузка данных...</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- График производительности -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <i class="fas fa-chart-line me-2"></i>Производительность
+                </div>
+                <div class="card-body">
+                    <canvas id="productionChart" height="250"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Правая колонка: Оповещения и общая информация -->
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-bell me-2"></i>Последние оповещения</span>
+                    <a href="/alerts" class="btn btn-sm btn-outline-primary">Все оповещения</a>
+                </div>
+                <div class="card-body" id="recent-alerts">
+                    <p>Загрузка данных...</p>
+                </div>
+            </div>
+            
+            <!-- Общая информация -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <i class="fas fa-info-circle me-2"></i>Общая информация
+                </div>
+                <div class="card-body" id="production-summary">
+                    <p>Загрузка данных...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Отладочная информация -->
+    <div class="card mt-4">
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-bug me-2"></i>Отладочная информация WebSocket</span>
+            <button class="btn btn-sm btn-light" onclick="document.getElementById('ws-debug').innerHTML = ''">Очистить</button>
+        </div>
+        <div class="card-body">
+            <div id="ws-debug" class="small" style="max-height: 200px; overflow-y: auto;">
+                <!-- Здесь будут отображаться сообщения отладки -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// WebSocket соединение
+let ws;
+let isConnected = false;
+let reconnectAttempts = 0;
+const maxReconnectAttempts = 5;
+
+// Инициализация графика производительности
+function initializeChart() {
+    const ctx = document.getElementById('productionChart').getContext('2d');
+    
+    // Создаем пустой график, который потом заполним данными
+    window.productionChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [], // Метки времени будут заполнены данными
+            datasets: [{
+                label: 'Производительность',
+                data: [],
+                borderColor: 'rgba(13, 110, 253, 1)',
+                backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: 'Время'
+                    }
+                },
+                y: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: 'Бутылок/час'
+                    },
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+}
+
+// Добавляем отладочную информацию
+function addDebugMessage(message, isError = false) {
+    const debugElement = document.getElementById('ws-debug');
+    if (debugElement) {
+        const messageElement = document.createElement('div');
+        messageElement.className = isError ? 'text-danger' : 'text-info';
+        messageElement.textContent = new Date().toLocaleTimeString() + ': ' + message;
+        debugElement.prepend(messageElement);
+
+        // Ограничиваем количество сообщений
+        while (debugElement.children.length > 10) {
+            debugElement.removeChild(debugElement.lastChild);
+        }
+    }
+}
+
+// Функция для установки WebSocket соединения
+function connectWebSocket() {
+    // Закрываем старое соединение, если есть
+    if (ws) {
+        ws.close();
+    }
+
+    const wsUrl = `ws://${window.location.host}/ws/dashboard`;
+    addDebugMessage(`Попытка подключения к ${wsUrl}`);
+
+    // Создаем новое соединение
+    ws = new WebSocket(wsUrl);
+
+    // Обработчик открытия соединения
+    ws.onopen = function() {
+        addDebugMessage("WebSocket соединение установлено");
+        isConnected = true;
+        reconnectAttempts = 0;
+
+        // Показываем индикатор подключения
+        document.getElementById('connection-status-badge').innerHTML =
+            '<span class="badge bg-success">Подключено</span>';
+    };
+
+    // Обработчик получения сообщения
+    ws.onmessage = function(event) {
+        addDebugMessage(`Получено сообщение (${event.data.length} байт)`);
+        try {
+            const data = JSON.parse(event.data);
+            updateDashboard(data);
+        } catch (error) {
+            addDebugMessage(`Ошибка парсинга JSON: ${error}`, true);
+        }
+    };
+
+    // Обработчик ошибок
+    ws.onerror = function(error) {
+        addDebugMessage(`WebSocket ошибка: ${error}`, true);
+        isConnected = false;
+
+        // Показываем индикатор ошибки
+        document.getElementById('connection-status-badge').innerHTML =
+            '<span class="badge bg-danger">Ошибка соединения</span>';
+    };
+
+    // Обработчик закрытия соединения
+    ws.onclose = function(event) {
+        addDebugMessage(`WebSocket соединение закрыто, код: ${event.code}, причина: ${event.reason}`);
+        isConnected = false;
+
+        // Показываем индикатор отключения
+        document.getElementById('connection-status-badge').innerHTML =
+            '<span class="badge bg-warning">Переподключение...</span>';
+
+        // Пробуем переподключиться
+        if (reconnectAttempts < maxReconnectAttempts) {
+            reconnectAttempts++;
+            setTimeout(connectWebSocket, 3000);
+        } else {
+            document.getElementById('connection-status-badge').innerHTML =
+                '<span class="badge bg-danger">Не удалось подключиться</span>';
+        }
+    };
+}
+
+// Функция для обновления дашборда
+function updateDashboard(data) {
+    // Проверяем наличие данных в консоли для отладки
+    console.log("Получены данные:", data);
+    
+    // Отображаем ключевые метрики
+    const productionStatus = data.production_status || {};
+    const metrics = productionStatus.metrics || {};
+    
+    // Обновляем карточки с метриками
+    document.getElementById('active-sensors-count').textContent = metrics.active_sensors || 0;
+    document.getElementById('alerts-count').textContent = metrics.alerts_24h || 0;
+    document.getElementById('system-status').textContent = productionStatus.status || "Неизвестно";
+    document.getElementById('last-update-time').textContent = new Date().toLocaleTimeString();
+    
+    // Устанавливаем цвет для статуса системы
+    const statusCard = document.getElementById('system-status').closest('.card');
+    if (productionStatus.status === 'normal') {
+        statusCard.className = 'card bg-success text-white';
+    } else if (productionStatus.status === 'warning') {
+        statusCard.className = 'card bg-warning text-white';
+    } else if (productionStatus.status === 'critical') {
+        statusCard.className = 'card bg-danger text-white';
+    }
+    
+    // Отображаем общую информацию
+    const summaryHtml = `
+        <dl class="row mb-0">
+            <dt class="col-sm-6">Активных датчиков:</dt>
+            <dd class="col-sm-6">${metrics.active_sensors || 0}</dd>
+            
+            <dt class="col-sm-6">Оповещений за 24ч:</dt>
+            <dd class="col-sm-6">${metrics.alerts_24h || 0}</dd>
+            
+            <dt class="col-sm-6">Статус системы:</dt>
+            <dd class="col-sm-6"><span class="badge ${getBadgeClass(productionStatus.status)}">${productionStatus.status || "Неизвестно"}</span></dd>
+            
+            <dt class="col-sm-6">Последнее обновление:</dt>
+            <dd class="col-sm-6">${metrics.last_update || new Date().toLocaleTimeString()}</dd>
+        </dl>
+    `;
+    document.getElementById('production-summary').innerHTML = summaryHtml;
+
+    // Отображаем последние оповещения
+    if (data.recent_alerts && data.recent_alerts.length > 0) {
+        const alertsHtml = `
+            <div class="list-group list-group-flush">
+                ${data.recent_alerts.map(alert => `
+                    <div class="list-group-item list-group-item-action p-3">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">${alert.sensor_name || "Датчик"}</h6>
+                            <small class="text-muted">${alert.timestamp}</small>
+                        </div>
+                        <p class="mb-1">
+                            <span class="badge ${alert.alert_type === 'warning' ? 'bg-danger' : 'bg-warning'} me-2">
+                                ${alert.alert_type}
+                            </span>
+                            ${alert.message}
+                        </p>
+                        <small class="text-muted">${alert.location || ""}</small>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        document.getElementById('recent-alerts').innerHTML = alertsHtml;
+    } else {
+        document.getElementById('recent-alerts').innerHTML = '<div class="text-center py-3">Нет новых оповещений</div>';
+    }
+
+    // Отображаем показания датчиков, сгруппированные по местоположению
+    if (data.sensor_readings && data.sensor_readings.length > 0) {
+        // Группируем датчики по местоположению
+        const locationGroups = {};
+        
+        data.sensor_readings.forEach(reading => {
+            if (!locationGroups[reading.location_name]) {
+                locationGroups[reading.location_name] = [];
+            }
+            locationGroups[reading.location_name].push(reading);
+        });
+        
+        let stagesHtml = '';
+        
+        // Создаем блок для каждого местоположения
+        for (const location in locationGroups) {
+            stagesHtml += `
+                <div class="col-md-4 mb-3">
+                    <div class="card h-100 sensor-card">
+                        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                            <span>
+                                <i class="fas fa-industry me-2"></i>${location}
+                            </span>
+                            <span class="badge bg-light text-dark">${locationGroups[location].length} датчиков</span>
+                        </div>
+                        <div class="card-body">
+                            ${locationGroups[location].map(reading => {
+                                // Парсим значение, если это JSON строка
+                                let displayValue = reading.value;
+                                let displayUnit = '';
+                                
+                                try {
+                                    // Проверяем, является ли значение строкой JSON
+                                    if (typeof reading.value === 'string' && 
+                                        (reading.value.startsWith('{') || reading.value.startsWith('['))) {
+                                        const valueObj = JSON.parse(reading.value);
+                                        
+                                        // Расширенный список ключей для поиска числовых значений
+                                        const valueKeys = ['temperature', 'pressure', 'level', 'speed', 'thickness', 
+                                                          'dimensions', 'flow', 'weight', 'humidity', 'flow_rate', 
+                                                          'defect_rate', 'wall_thickness', 'packaging_speed'];
+                                        
+                                        // Ищем числовое значение по ключу
+                                        const valueKey = Object.keys(valueObj).find(key => valueKeys.includes(key));
+                                        
+                                        if (valueKey) {
+                                            // Найдено конкретное значение
+                                            displayValue = formatNumber(valueObj[valueKey]);
+                                            displayUnit = valueObj.unit || '';
+                                        } else if (valueObj.value !== undefined) {
+                                            // Если есть поле "value"
+                                            displayValue = formatNumber(valueObj.value);
+                                            displayUnit = valueObj.unit || '';
+                                        } else {
+                                            // Если не нашли ни одного подходящего ключа, но есть числовое значение
+                                            const numericKey = Object.keys(valueObj).find(key => 
+                                                !isNaN(parseFloat(valueObj[key])) && 
+                                                !['sensor_id', 'timestamp', 'time', 'id'].includes(key)
+                                            );
+                                            
+                                            if (numericKey) {
+                                                displayValue = formatNumber(valueObj[numericKey]);
+                                                // Пытаемся определить единицу измерения из названия ключа
+                                                if (numericKey.includes('temp')) displayUnit = '°C';
+                                                else if (numericKey.includes('press')) displayUnit = 'бар';
+                                                else if (numericKey.includes('level')) displayUnit = '%';
+                                                else if (numericKey.includes('speed')) displayUnit = 'шт/мин';
+                                                else if (numericKey.includes('humidity')) displayUnit = '%';
+                                                else if (numericKey.includes('thickness')) displayUnit = 'мм';
+                                                else displayUnit = valueObj.unit || '';
+                                            } else {
+                                                // Просто показываем значение в красивом виде
+                                                displayValue = JSON.stringify(valueObj, null, 2);
+                                                displayUnit = '';
+                                            }
+                                        }
+                                    } else if (!isNaN(parseFloat(reading.value))) {
+                                        // Если значение - просто число, форматируем его
+                                        displayValue = formatNumber(reading.value);
+                                        
+                                        // Определяем единицу измерения из типа датчика, если она не указана
+                                        if (reading.sensor_type && reading.sensor_type.includes('temp')) {
+                                            displayUnit = '°C';
+                                        } else if (reading.sensor_type && reading.sensor_type.includes('press')) {
+                                            displayUnit = 'бар';
+                                        } else if (reading.sensor_type && reading.sensor_type.includes('level')) {
+                                            displayUnit = '%';
+                                        }
+                                    }
+                                } catch (e) {
+                                    // Если не JSON, проверяем, может это числовое значение
+                                    if (!isNaN(parseFloat(reading.value))) {
+                                        displayValue = formatNumber(reading.value);
+                                    } else {
+                                        // Если не число, оставляем как есть
+                                        displayValue = reading.value;
+                                    }
+                                }
+                                
+                                return `
+                                    <div class="mb-3">
+                                        <div class="d-flex justify-content-between align-items-center mb-1">
+                                            <strong>${reading.sensor_name}</strong>
+                                            <span class="badge ${getSensorBadgeClass(reading)}">${getSensorStatus(reading)}</span>
+                                        </div>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div class="sensor-value">${displayValue} ${displayUnit}</div>
+                                            <small class="text-muted">${formatTime(reading.time)}</small>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                        <div class="card-footer text-end">
+                            <a href="/sensors?location=${encodeURIComponent(location)}" class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-external-link-alt me-1"></i>Подробнее
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        document.getElementById('production-status').innerHTML = stagesHtml;
+    } else {
+        document.getElementById('production-status').innerHTML = '<div class="col-12 text-center py-3">Нет данных о датчиках</div>';
+    }
+    
+    // Обновляем данные графика производительности (пример)
+    updateProductionChart();
+}
+
+// Вспомогательные функции
+function getBadgeClass(status) {
+    if (status === 'normal') return 'bg-success';
+    if (status === 'warning') return 'bg-warning';
+    if (status === 'critical' || status === 'error') return 'bg-danger';
+    return 'bg-secondary';
+}
+
+function getSensorStatus(reading) {
+    // Здесь можно реализовать логику определения статуса датчика
+    return 'OK';
+}
+
+function getSensorBadgeClass(reading) {
+    // Здесь можно реализовать логику определения класса для статуса датчика
+    return 'bg-success';
+}
+
+function formatTime(timeStr) {
+    if (!timeStr) return 'н/д';
+    
+    try {
+        // Пытаемся разобрать дату
+        const date = new Date(timeStr);
+        if (isNaN(date.getTime())) {
+            return timeStr; // Если не получилось разобрать, возвращаем как есть
+        }
+        
+        // Получаем текущую дату
+        const now = new Date();
+        
+        // Если дата сегодняшняя, показываем только время
+        if (date.toDateString() === now.toDateString()) {
+            return date.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+        } else {
+            // Иначе показываем дату и время
+            return date.toLocaleString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+    } catch (e) {
+        return timeStr; // Если произошла ошибка, возвращаем исходную строку
+    }
+}
+
+// Пример обновления графика производительности
+function updateProductionChart() {
+    if (!window.productionChart) return;
+    
+    // Генерация случайных данных для примера
+    const labels = [];
+    const data = [];
+    const now = new Date();
+    
+    for (let i = 11; i >= 0; i--) {
+        let time = new Date(now);
+        time.setHours(now.getHours() - i);
+        labels.push(time.getHours() + ':00');
+        // Случайное значение от 80 до 120
+        data.push(Math.floor(Math.random() * 40) + 80);
+    }
+    
+    window.productionChart.data.labels = labels;
+    window.productionChart.data.datasets[0].data = data;
+    window.productionChart.update();
+}
+
+// Функция для форматирования числовых значений
+function formatNumber(value) {
+    // Преобразуем в число
+    const num = parseFloat(value);
+    
+    if (isNaN(num)) return value; // Если не число, возвращаем как есть
+    
+    // Округляем в зависимости от величины
+    if (Math.abs(num) < 0.01) {
+        return num.toFixed(4); // Для очень маленьких чисел
+    } else if (Math.abs(num) < 1) {
+        return num.toFixed(3); // Для маленьких чисел
+    } else if (Math.abs(num) < 10) {
+        return num.toFixed(2); // Для чисел от 1 до 10
+    } else if (Math.abs(num) < 100) {
+        return num.toFixed(1); // Для чисел от 10 до 100
+    } else {
+        return Math.round(num).toString(); // Для больших чисел
+    }
+}
+
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    // Инициализируем график
+    initializeChart();
+    
+    // Устанавливаем WebSocket соединение
+    connectWebSocket();
+});
+
+// Закрываем соединение при уходе со страницы
+window.addEventListener('beforeunload', function() {
+    if (ws) {
+        ws.close();
+    }
+});
+</script>
+
+<h1>Добро пожаловать, {{ username }}</h1>
+<p>Роль: {{ role }}</p>
+{% endblock %}
+
+{% block scripts %}
+<!-- Здесь можно добавить дополнительные скрипты для дашборда -->
+{% endblock %} 
