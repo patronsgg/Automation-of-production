@@ -58,41 +58,71 @@ async def get_alerts(
 ):
     """Получение списка оповещений с возможностью фильтрации"""
     try:
+        # Проверяем наличие событий без фильтров
+        check_query = sa.select(sa.func.count(Event.id))
+        count_result = await db.execute(check_query)
+        events_count = count_result.scalar() or 0
+        
+        logger.info(f"Всего найдено событий: {events_count}")
+        
+        # Основной запрос с минимальными фильтрами
         query = sa.select(
             Event, 
             Sensor.sensor_name
         ).outerjoin(
             Sensor, Event.sensor_id == Sensor.id
-        ).filter(
-            Event.event_type.in_(["high_value", "low_value", "value_exceeded"])
         )
         
-        # Применяем фильтры
-        if event_type:
-            query = query.filter(Event.event_type == event_type)
+        # Применяем фильтры только если есть события
+        if events_count > 0:
+            # Проверяем, какое поле есть в таблице Event
+            if hasattr(Event, 'alert_type'):
+                if event_type:
+                    query = query.filter(Event.alert_type == event_type)
+                else:
+                    # Не применяем фильтр по типу, чтобы показать все события
+                    pass
+            elif hasattr(Event, 'event_type'):
+                if event_type:
+                    query = query.filter(Event.event_type == event_type)
+                else:
+                    # Не применяем фильтр по типу, чтобы показать все события
+                    pass
+                
+            # Фильтрация по времени
+            if from_time:
+                if hasattr(Event, 'timestamp'):
+                    query = query.filter(Event.timestamp >= from_time)
+                elif hasattr(Event, 'time'):
+                    query = query.filter(Event.time >= from_time)
+                    
+            if to_time:
+                if hasattr(Event, 'timestamp'):
+                    query = query.filter(Event.timestamp <= to_time)
+                elif hasattr(Event, 'time'):
+                    query = query.filter(Event.time <= to_time)
             
-        if from_time:
-            query = query.filter(Event.time >= from_time)
-        if to_time:
-            query = query.filter(Event.time <= to_time)
-        else:
-            # По умолчанию оповещения за последние 7 дней
-            if not from_time:
-                query = query.filter(Event.time >= datetime.now() - timedelta(days=7))
-        
-        query = query.order_by(Event.time.desc())
+            # Сортировка
+            if hasattr(Event, 'timestamp'):
+                query = query.order_by(Event.timestamp.desc())
+            elif hasattr(Event, 'time'):
+                query = query.order_by(Event.time.desc())
         
         result = await db.execute(query)
         alerts = result.all()
+        logger.info(f"Найдено оповещений после применения фильтров: {len(alerts)}")
         
         return [
             {
                 "id": row.Event.id,
-                "time": row.Event.time.isoformat(),
-                "event_type": row.Event.event_type,
-                "description": row.Event.description,
+                "time": row.Event.timestamp.isoformat() if hasattr(row.Event, 'timestamp') and row.Event.timestamp else 
+                       (row.Event.time.isoformat() if hasattr(row.Event, 'time') and row.Event.time else None),
+                "event_type": row.Event.alert_type if hasattr(row.Event, 'alert_type') else 
+                             (row.Event.event_type if hasattr(row.Event, 'event_type') else "unknown"),
+                "description": row.Event.description if hasattr(row.Event, 'description') else 
+                              (row.Event.message if hasattr(row.Event, 'message') else "Нет описания"),
                 "sensor_id": row.Event.sensor_id,
-                "sensor_name": row.sensor_name
+                "sensor_name": row.sensor_name or "Неизвестно"
             }
             for row in alerts
         ]
@@ -174,8 +204,8 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_async_session)):
         
         # Получаем последние 5 оповещений
         alerts_query = sa.select(Event).filter(
-            Event.event_type.in_(["high_value", "low_value", "value_exceeded"])
-        ).order_by(Event.time.desc()).limit(5)
+            Event.alert_type.in_(["high_value", "low_value", "value_exceeded"])
+        ).order_by(Event.timestamp.desc()).limit(5)
         
         result = await db.execute(alerts_query)
         recent_alerts = result.scalars().all()
@@ -234,7 +264,7 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_async_session)):
             "recent_alerts": [
                 {
                     "id": alert.id,
-                    "type": alert.event_type,
+                    "type": alert.alert_type,
                     "description": alert.description,
                     "time": alert.time.isoformat()
                 }

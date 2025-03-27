@@ -295,9 +295,13 @@ async def alerts_page(request: Request, db: AsyncSession = Depends(get_async_ses
     if not user:
         return RedirectResponse(url=f'/login?next=/alerts')
 
+    # Получаем токен из cookie для передачи в шаблон
+    token = request.cookies.get('access_token', '')
+    
     return templates.TemplateResponse("alerts.html", {
         "request": request,
-        "user": user
+        "user": user,
+        "token": token  # Передаем токен в шаблон
     })
 
 
