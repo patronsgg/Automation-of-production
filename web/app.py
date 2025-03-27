@@ -21,6 +21,7 @@ import logging
 import asyncio
 import random
 from sqlalchemy.orm import joinedload
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -580,11 +581,26 @@ async def create_test_readings(db: AsyncSession, sensors):
             if setting:
                 try:
                     float_value = float(value)
-                    min_value = float(setting.min_value) if setting.min_value else None
-                    max_value = float(setting.max_value) if setting.max_value else None
                     
-                    if (min_value and float_value < min_value) or (max_value and float_value > max_value):
-                        message = f"Значение {float_value} {'ниже допустимого ' + str(min_value) if float_value < min_value else 'выше допустимого ' + str(max_value)}"
+                    # Дополнительная проверка на существование значений и корректность типов
+                    min_value = None
+                    if setting.min_value and setting.min_value.strip():
+                        try:
+                            min_value = float(setting.min_value)
+                        except (ValueError, TypeError):
+                            min_value = None
+                    
+                    max_value = None
+                    if setting.max_value and setting.max_value.strip():
+                        try:
+                            max_value = float(setting.max_value)
+                        except (ValueError, TypeError):
+                            max_value = None
+                    
+                    # Добавляем событие только если значения корректны
+                    # и мы можем безопасно выполнить сравнение
+                    if min_value is not None and isinstance(min_value, (int, float)) and float_value < min_value:
+                        message = f"Значение {float_value} ниже допустимого {min_value}"
                         
                         new_event = Event(
                             sensor_id=sensor.id,
@@ -595,8 +611,21 @@ async def create_test_readings(db: AsyncSession, sensors):
                             timestamp=current_time
                         )
                         db.add(new_event)
-                except (ValueError, TypeError):
-                    pass
+                    elif max_value is not None and isinstance(max_value, (int, float)) and float_value > max_value:
+                        message = f"Значение {float_value} выше допустимого {max_value}"
+                        
+                        new_event = Event(
+                            sensor_id=sensor.id,
+                            alert_type="warning",
+                            message=message,
+                            location_id=sensor.location_id,
+                            value=value,
+                            timestamp=current_time
+                        )
+                        db.add(new_event)
+                
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Ошибка при проверке значений датчика: {e}")
         
         db.add_all(test_readings)
         await db.commit()
@@ -729,7 +758,10 @@ async def websocket_alerts(websocket: WebSocket, db: AsyncSession = Depends(get_
             ).outerjoin(
                 Sensor, Event.sensor_id == Sensor.id
             ).filter(
-                Event.event_type.in_(["high_value", "low_value", "value_exceeded"])
+                sa.and_(
+                    Event.event_type.is_not(None),  # Проверяем, что не NULL
+                    Event.event_type.in_(["high_value", "low_value", "value_exceeded"])
+                )
             ).order_by(Event.time.desc()).limit(100)
             
             result = await db.execute(query)
@@ -944,31 +976,41 @@ async def get_latest_sensor_readings(request: Request, db: AsyncSession = Depend
                 
                 reading = new_reading
             
-            # Безопасное преобразование значений
-            try:
-                value_float = float(reading.value) if reading and reading.value else 0
-            except (ValueError, TypeError):
-                value_float = 0
-            
+            # Переменные по умолчанию
+            value_float = 0
             min_value = None
             max_value = None
-            
-            if setting:
-                try:
-                    min_value = float(setting.min_value) if setting.min_value else None
-                except (ValueError, TypeError):
-                    min_value = None
-                
-                try:
-                    max_value = float(setting.max_value) if setting.max_value else None
-                except (ValueError, TypeError):
-                    max_value = None
-            
-            # Определение статуса
             status = "normal"
-            if min_value is not None and value_float < min_value:
+            
+            # Безопасное получение текущего значения
+            if reading and reading.value:
+                try:
+                    value_float = float(reading.value)
+                except (ValueError, TypeError):
+                    logger.warning(f"Не удалось преобразовать значение {reading.value} в число")
+            
+            # Безопасное получение минимального значения
+            if setting and setting.min_value:
+                try:
+                    min_value_str = setting.min_value.strip() if isinstance(setting.min_value, str) else setting.min_value
+                    if min_value_str:  # Проверяем, что строка не пустая
+                        min_value = float(min_value_str)
+                except (ValueError, TypeError, AttributeError):
+                    logger.warning(f"Не удалось преобразовать минимальное значение {setting.min_value} в число")
+            
+            # Безопасное получение максимального значения
+            if setting and setting.max_value:
+                try:
+                    max_value_str = setting.max_value.strip() if isinstance(setting.max_value, str) else setting.max_value
+                    if max_value_str:  # Проверяем, что строка не пустая
+                        max_value = float(max_value_str)
+                except (ValueError, TypeError, AttributeError):
+                    logger.warning(f"Не удалось преобразовать максимальное значение {setting.max_value} в число")
+            
+            # Определение статуса только если все значения правильно установлены
+            if isinstance(min_value, (int, float)) and isinstance(value_float, (int, float)) and value_float < min_value:
                 status = "alert"
-            elif max_value is not None and value_float > max_value:
+            elif isinstance(max_value, (int, float)) and isinstance(value_float, (int, float)) and value_float > max_value:
                 status = "alert"
             
             location_name = sensor.location.name if sensor.location else "Неизвестно"
@@ -990,8 +1032,7 @@ async def get_latest_sensor_readings(request: Request, db: AsyncSession = Depend
     
     except Exception as e:
         logger.error(f"Ошибка при получении данных датчиков: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+        logger.error(f"Детали ошибки: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ошибка при получении данных датчиков: {str(e)}"
@@ -1035,6 +1076,91 @@ async def generate_test_data(request: Request, db: AsyncSession = Depends(get_as
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ошибка при генерации тестовых данных: {str(e)}"
         )
+
+
+@app.get("/equipment-settings/generate-test")
+async def generate_test_equipment_settings(db: AsyncSession = Depends(get_async_session)):
+    """Создание тестовых настроек оборудования для датчиков"""
+    try:
+        result = await create_test_equipment_settings(db)
+        return {"success": result, "message": "Тестовые настройки оборудования созданы"}
+    except Exception as e:
+        logger.error(f"Ошибка при генерации тестовых настроек: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Ошибка при генерации тестовых настроек: {str(e)}"
+        )
+
+async def create_test_equipment_settings(db: AsyncSession):
+    """Создание тестовых настроек оборудования для датчиков"""
+    try:
+        # Получаем все датчики
+        sensors_query = sa.select(Sensor)
+        sensors_result = await db.execute(sensors_query)
+        sensors = sensors_result.scalars().all()
+        
+        if not sensors:
+            logger.warning("Датчики не найдены для создания настроек")
+            return
+        
+        # Проверяем наличие существующих настроек
+        existing_query = sa.select(EquipmentSetting)
+        existing_result = await db.execute(existing_query)
+        existing_settings = existing_result.scalars().all()
+        
+        # Создаем словарь существующих настроек по sensor_id
+        existing_settings_dict = {es.sensor_id: es for es in existing_settings}
+        
+        # Счетчики для логирования
+        created_count = 0
+        updated_count = 0
+        
+        # Создаем настройки для датчиков
+        for sensor in sensors:
+            # Определяем диапазоны в зависимости от типа датчика - используем числа вместо строк
+            if "temperature" in sensor.sensor_type:
+                min_value, max_value = 20.0, 80.0
+            elif "pressure" in sensor.sensor_type:
+                min_value, max_value = 1.0, 10.0
+            elif "speed" in sensor.sensor_type:
+                min_value, max_value = 10.0, 100.0
+            elif "level" in sensor.sensor_type:
+                min_value, max_value = 10.0, 90.0
+            elif "quality" in sensor.sensor_type:
+                min_value, max_value = 85.0, 100.0
+            elif "weight" in sensor.sensor_type:
+                min_value, max_value = 0.5, 2.0
+            elif "flow" in sensor.sensor_type:
+                min_value, max_value = 50.0, 150.0
+            else:
+                min_value, max_value = 0.0, 100.0
+            
+            # Проверяем существует ли настройка для этого датчика
+            if sensor.id in existing_settings_dict:
+                # Обновляем существующую настройку
+                existing_setting = existing_settings_dict[sensor.id]
+                existing_setting.min_value = min_value
+                existing_setting.max_value = max_value
+                updated_count += 1
+            else:
+                # Создаем новую настройку с числовыми значениями
+                new_setting = EquipmentSetting(
+                    sensor_id=sensor.id,
+                    min_value=min_value,
+                    max_value=max_value,
+                )
+                db.add(new_setting)
+                created_count += 1
+        
+        # Сохраняем изменения
+        await db.commit()
+        logger.info(f"Создано {created_count} и обновлено {updated_count} настроек оборудования")
+        
+        return True
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Ошибка при создании настроек оборудования: {e}")
+        raise
 
 
 if __name__ == "__main__":

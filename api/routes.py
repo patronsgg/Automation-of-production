@@ -292,13 +292,32 @@ async def get_latest_sensor_data(db: AsyncSession = Depends(get_async_session)):
                 "time": row.SensorReading.time.isoformat(),
                 "min_value": row.min_value,
                 "max_value": row.max_value,
-                "status": "normal" if (row.min_value <= row.SensorReading.value <= row.max_value) else "alert"
+                "status": get_sensor_status(row.SensorReading.value, row.min_value, row.max_value)
             }
             for row in rows
         ]
     except Exception as e:
         logger.error(f"Ошибка получения данных датчиков: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+def get_sensor_status(value, min_value, max_value):
+    """Функция для определения статуса датчика с учетом возможных None-значений"""
+    try:
+        # Преобразуем значения к числам, если это возможно
+        value_float = float(value) if value is not None else None
+        min_value_float = float(min_value) if min_value is not None else None
+        max_value_float = float(max_value) if max_value is not None else None
+        
+        # Проверяем условия только если значения не None
+        if value_float is not None and min_value_float is not None and value_float < min_value_float:
+            return "alert"
+        elif value_float is not None and max_value_float is not None and value_float > max_value_float:
+            return "alert"
+        else:
+            return "normal"
+    except (ValueError, TypeError):
+        # В случае ошибки конвертации возвращаем "normal"
+        return "normal"
 
 
 @router.get("/statistics/production")
