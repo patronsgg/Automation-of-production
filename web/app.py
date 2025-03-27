@@ -22,6 +22,7 @@ import asyncio
 import random
 from sqlalchemy.orm import joinedload
 import traceback
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -985,9 +986,27 @@ async def get_latest_sensor_readings(request: Request, db: AsyncSession = Depend
             # Безопасное получение текущего значения
             if reading and reading.value:
                 try:
-                    value_float = float(reading.value)
-                except (ValueError, TypeError):
-                    logger.warning(f"Не удалось преобразовать значение {reading.value} в число")
+                    # Проверяем, является ли значение JSON-строкой
+                    if reading.value.startswith('{') and reading.value.endswith('}'):
+                        # Парсим JSON
+                        data = json.loads(reading.value)
+                        # Ищем числовое значение в JSON (берем первое найденное числовое значение)
+                        value_found = False
+                        for key, val in data.items():
+                            if isinstance(val, (int, float)) and key not in ['sensor_id', 'timestamp']:
+                                value_float = val
+                                value_found = True
+                                break
+                        
+                        if not value_found:
+                            # Если числового значения нет, пытаемся использовать само значение
+                            value_float = float(reading.value)
+                    else:
+                        # Если не JSON, пробуем преобразовать как обычное число
+                        value_float = float(reading.value)
+                except (ValueError, TypeError, json.JSONDecodeError) as e:
+                    logger.warning(f"Не удалось преобразовать значение {reading.value} в число: {e}")
+                    value_float = 0
             
             # Безопасное получение минимального значения
             if setting and setting.min_value:
@@ -1010,8 +1029,12 @@ async def get_latest_sensor_readings(request: Request, db: AsyncSession = Depend
             # Определение статуса только если все значения правильно установлены
             if isinstance(min_value, (int, float)) and isinstance(value_float, (int, float)) and value_float < min_value:
                 status = "alert"
+                logger.info(f"Датчик {sensor.sensor_name} в статусе alert: значение {value_float} < {min_value}")
             elif isinstance(max_value, (int, float)) and isinstance(value_float, (int, float)) and value_float > max_value:
                 status = "alert"
+                logger.info(f"Датчик {sensor.sensor_name} в статусе alert: значение {value_float} > {max_value}")
+            else:
+                logger.info(f"Датчик {sensor.sensor_name} в статусе normal: значение {value_float}, диапазон: {min_value}-{max_value}")
             
             location_name = sensor.location.name if sensor.location else "Неизвестно"
             

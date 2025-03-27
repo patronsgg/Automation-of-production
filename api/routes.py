@@ -288,17 +288,41 @@ async def get_latest_sensor_data(db: AsyncSession = Depends(get_async_session)):
                 "sensor_id": row.SensorReading.sensor_id,
                 "sensor_name": row.sensor_name,
                 "location": row.location_name,
-                "value": row.SensorReading.value,
+                "value": extract_numeric_value(row.SensorReading.value),
                 "time": row.SensorReading.time.isoformat(),
                 "min_value": row.min_value,
                 "max_value": row.max_value,
-                "status": get_sensor_status(row.SensorReading.value, row.min_value, row.max_value)
+                "status": get_sensor_status(extract_numeric_value(row.SensorReading.value), row.min_value, row.max_value)
             }
             for row in rows
         ]
     except Exception as e:
         logger.error(f"Ошибка получения данных датчиков: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+def extract_numeric_value(value_str):
+    """Извлекает числовое значение из строки или JSON"""
+    if not value_str:
+        return 0
+    
+    try:
+        # Проверяем, является ли значение JSON-строкой
+        if isinstance(value_str, str) and value_str.startswith('{') and value_str.endswith('}'):
+            import json
+            # Парсим JSON
+            data = json.loads(value_str)
+            # Ищем числовое значение в JSON (берем первое найденное числовое значение)
+            for key, val in data.items():
+                if isinstance(val, (int, float)) and key not in ['sensor_id', 'timestamp']:
+                    return val
+            
+            # Если числового значения нет, пытаемся преобразовать само значение
+            return float(value_str)
+        else:
+            # Если не JSON, пробуем преобразовать как обычное число
+            return float(value_str)
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return 0
 
 def get_sensor_status(value, min_value, max_value):
     """Функция для определения статуса датчика с учетом возможных None-значений"""
