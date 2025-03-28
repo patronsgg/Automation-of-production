@@ -20,27 +20,43 @@ MQTT_PORT = 1883
 MQTT_USERNAME = ""
 MQTT_PASSWORD = ""
 
-# Конфигурация датчиков
+# Конфигурация датчиков, соответствующая init_db.py
 SENSORS = {
-    # Датчики этапа подготовки сырья
-    "raw_material_temp": {"id": 1, "topic": "pet/raw-material/temperature", "min": 20, "max": 60, "unit": "°C"},
-    "raw_material_humidity": {"id": 2, "topic": "pet/raw-material/humidity", "min": 5, "max": 15, "unit": "%"},
-
-    # Датчики этапа формирования бутылки
-    "forming_temp": {"id": 3, "topic": "pet/bottleforming/temperature", "min": 250, "max": 300, "unit": "°C"},
-    "forming_pressure": {"id": 4, "topic": "pet/bottleforming/pressure", "min": 10, "max": 20, "unit": "bar"},
-
-    # Датчики этапа охлаждения
-    "cooling_temp": {"id": 5, "topic": "pet/cooling/temperature", "min": 10, "max": 25, "unit": "°C"},
-    "cooling_flow": {"id": 6, "topic": "pet/cooling/flow", "min": 50, "max": 150, "unit": "l/min"},
-
-    # Датчики этапа контроля качества
-    "quality_thickness": {"id": 7, "topic": "pet/quality/thickness", "min": 0.3, "max": 0.7, "unit": "mm"},
-    "quality_defect_rate": {"id": 8, "topic": "pet/quality/defect_rate", "min": 0, "max": 5, "unit": "%"},
-
-    # Датчики этапа упаковки
-    "packaging_speed": {"id": 9, "topic": "pet/packaging/speed", "min": 60, "max": 120, "unit": "bottles/min"},
-    "bottles_packed": {"id": 10, "topic": "pet/packaging/count", "min": 0, "max": 1000, "unit": "bottles"}
+    # Датчики линии подготовки сырья
+    "raw_material_temp": {"id": 1, "topic": "pet/raw-material/temperature", "min": 20, "max": 80, "unit": "°C", 
+                         "name": "Датчик температуры сырья"},
+    "raw_material_pressure": {"id": 2, "topic": "pet/raw-material/pressure", "min": 1, "max": 10, "unit": "bar", 
+                             "name": "Датчик давления сырья"},
+    "raw_material_level": {"id": 3, "topic": "pet/raw-material/level", "min": 10, "max": 90, "unit": "%", 
+                          "name": "Датчик уровня сырья"},
+    
+    # Датчики формования бутылок
+    "forming_temp": {"id": 4, "topic": "pet/bottleforming/temperature", "min": 20, "max": 80, "unit": "°C", 
+                    "name": "Датчик температуры форм"},
+    "forming_pressure": {"id": 5, "topic": "pet/bottleforming/pressure", "min": 1, "max": 10, "unit": "bar", 
+                        "name": "Датчик давления формователя"},
+    "forming_speed": {"id": 6, "topic": "pet/bottleforming/speed", "min": 10, "max": 100, "unit": "rpm", 
+                     "name": "Датчик скорости формователя"},
+    
+    # Датчики системы охлаждения
+    "cooling_temp": {"id": 7, "topic": "pet/cooling/temperature", "min": 20, "max": 80, "unit": "°C", 
+                    "name": "Датчик температуры охлаждения"},
+    "cooling_pressure": {"id": 8, "topic": "pet/cooling/pressure", "min": 1, "max": 10, "unit": "bar", 
+                        "name": "Датчик давления охлаждения"},
+    "cooling_flow": {"id": 9, "topic": "pet/cooling/flow", "min": 50, "max": 150, "unit": "л/мин", 
+                    "name": "Датчик расхода охлаждающей жидкости"},
+    
+    # Датчики контроля качества
+    "quality_thickness": {"id": 10, "topic": "pet/quality/thickness", "min": 85, "max": 100, "unit": "%", 
+                         "name": "Датчик качества толщины"},
+    "quality_dimensions": {"id": 11, "topic": "pet/quality/dimensions", "min": 85, "max": 100, "unit": "%", 
+                          "name": "Датчик качества размеров"},
+    
+    # Датчики упаковки
+    "packaging_speed": {"id": 12, "topic": "pet/packaging/speed", "min": 10, "max": 100, "unit": "шт/мин", 
+                       "name": "Датчик скорости упаковки"},
+    "packaging_weight": {"id": 13, "topic": "pet/packaging/weight", "min": 0.5, "max": 2.0, "unit": "кг", 
+                        "name": "Датчик веса упаковки"}
 }
 
 
@@ -67,7 +83,7 @@ def send_sensor_data(client, sensor_name, sensor_config, anomaly_chance=0.05):
     value = generate_value(sensor_config, anomaly_chance)
     timestamp = datetime.now().isoformat()
 
-    # Формируем сообщение (без поля "value", которое вызывает конфликт)
+    # Формируем сообщение
     message = {
         "sensor_id": sensor_config["id"],
         "timestamp": timestamp,
@@ -76,21 +92,23 @@ def send_sensor_data(client, sensor_name, sensor_config, anomaly_chance=0.05):
 
     # Добавляем специфичное название параметра в зависимости от датчика
     if "temp" in sensor_name:
-        message["temperature"] = value
-    elif "humidity" in sensor_name:
-        message["humidity"] = value
+        message["temperature"] = round(value, 1)
     elif "pressure" in sensor_name:
-        message["pressure"] = value
+        message["pressure"] = round(value, 2)
+    elif "level" in sensor_name:
+        message["level"] = round(value, 1)
     elif "flow" in sensor_name:
-        message["flow_rate"] = value
+        message["flow_rate"] = round(value, 2)
     elif "thickness" in sensor_name:
-        message["wall_thickness"] = value
-    elif "defect_rate" in sensor_name:
-        message["defect_rate"] = value
+        message["quality_index"] = round(value, 1)
+    elif "dimensions" in sensor_name:
+        message["quality_index"] = round(value, 1)
     elif "speed" in sensor_name:
-        message["packaging_speed"] = value
-    elif "count" in sensor_name:
-        message["bottles_packed"] = value
+        message["speed"] = round(value)
+    elif "weight" in sensor_name:
+        message["weight"] = round(value, 3)
+    else:
+        message["value"] = round(value, 2)
 
     # Отправляем сообщение
     client.publish(sensor_config["topic"], json.dumps(message))
@@ -119,30 +137,26 @@ def generate_historical_data(client, days=7, interval_minutes=15, anomaly_chance
             message = {
                 "sensor_id": sensor_config["id"],
                 "timestamp": timestamp,
-                "value": value,
                 "unit": sensor_config["unit"]
             }
 
             # Добавляем специфичное название параметра
             if "temp" in sensor_name:
-                message["temperature"] = value
-            elif "humidity" in sensor_name:
-                message["humidity"] = value
+                message["temperature"] = round(value, 1)
             elif "pressure" in sensor_name:
-                message["pressure"] = value
+                message["pressure"] = round(value, 2)
+            elif "level" in sensor_name:
+                message["level"] = round(value, 1)
             elif "flow" in sensor_name:
-                message["flow_rate"] = value
-            elif "thickness" in sensor_name:
-                message["wall_thickness"] = value
-            elif "defect_rate" in sensor_name:
-                message["defect_rate"] = value
+                message["flow_rate"] = round(value, 2)
+            elif "thickness" in sensor_name or "dimensions" in sensor_name:
+                message["quality_index"] = round(value, 1)
             elif "speed" in sensor_name:
-                message["packaging_speed"] = value
-            elif "count" in sensor_name:
-                # Для счетчика бутылок увеличиваем значение
-                bottles_count += random.randint(50, 150)
-                message["bottles_packed"] = bottles_count
-                message["value"] = bottles_count
+                message["speed"] = round(value)
+            elif "weight" in sensor_name:
+                message["weight"] = round(value, 3)
+            else:
+                message["value"] = round(value, 2)
 
             # Отправляем сообщение
             client.publish(sensor_config["topic"], json.dumps(message))
