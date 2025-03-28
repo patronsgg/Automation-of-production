@@ -5,9 +5,9 @@ services:
   postgres:
     image: postgres:14
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: pet_bottle_automation
+      POSTGRES_USER: 1
+      POSTGRES_PASSWORD: 1
+      POSTGRES_DB: production
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -52,25 +52,28 @@ services:
       - kafka
       - mosquitto
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres/pet_bottle_automation
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=1
+      - DB_PASS=1
+      - DB_NAME=production
       - MQTT_BROKER=mosquitto
       - MQTT_PORT=1883
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
+      - MQTT_QOS=1
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_MAX_BATCH_SIZE=16384
+      - KAFKA_LINGER_MS=100
+      - SECRET_KEY=abc
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=1440
     ports:
       - "8000:8000"
     volumes:
       - ./logs:/app/logs
 
-  # Симулятор датчиков
-  simulator:
-    build:
-      context: .
-      dockerfile: Dockerfile.simulator
-    depends_on:
-      - mosquitto
-    environment:
-      - MQTT_BROKER=mosquitto
-      - MQTT_PORT=1883
+
 
 volumes:
   postgres_data:
