@@ -455,6 +455,7 @@ async def generate_sensor_readings(sensors, hours=24):
                         events_batch = []
 
                     # Увеличиваем время на интервал
+                    current_time += timedelta(minutes=5)  # Увеличиваем время на 5 минут
 
             # Сохраняем оставшиеся данные в батчах
             if readings_batch:
