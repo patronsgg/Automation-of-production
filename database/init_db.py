@@ -241,27 +241,26 @@ async def create_equipment_settings(sensors):
             for sensor in sensors:
                 # Определяем диапазоны в зависимости от типа датчика
                 if "temperature" in sensor.sensor_type:
-                    min_value, max_value = "20", "80"
+                    min_value, max_value = 20, 80
                 elif "pressure" in sensor.sensor_type:
-                    min_value, max_value = "1", "10"
+                    min_value, max_value = 1, 10
                 elif "speed" in sensor.sensor_type:
-                    min_value, max_value = "10", "100"
+                    min_value, max_value = 10, 100
                 elif "level" in sensor.sensor_type:
-                    min_value, max_value = "10", "90"
+                    min_value, max_value = 10, 90
                 elif "quality" in sensor.sensor_type:
-                    min_value, max_value = "85", "100"
+                    min_value, max_value = 85, 100
                 elif "weight" in sensor.sensor_type:
-                    min_value, max_value = "0.5", "2.0"
+                    min_value, max_value = 0.5, 2.0
                 elif "flow" in sensor.sensor_type:
-                    min_value, max_value = "50", "150"
+                    min_value, max_value = 50, 150
                 else:
-                    min_value, max_value = "0", "100"
+                    min_value, max_value = 0, 100
 
                 setting = EquipmentSetting(
                     sensor_id=sensor.id,
                     min_value=min_value,
                     max_value=max_value,
-                    interval="60"  # Интервал обновления в секундах
                 )
                 settings.append(setting)
                 session.add(setting)
@@ -304,7 +303,6 @@ async def generate_sensor_readings(sensors, hours=24):
                     settings_dict[sensor.id] = {
                         'min_value': float(setting.min_value) if setting.min_value else 0,
                         'max_value': float(setting.max_value) if setting.max_value else 100,
-                        'interval': int(setting.interval) if setting.interval else 60
                     }
 
             # Генерируем данные
@@ -326,7 +324,6 @@ async def generate_sensor_readings(sensors, hours=24):
                 settings = settings_dict[sensor.id]
 
                 # Определяем интервал между точками данных (в минутах)
-                interval_minutes = max(5, settings['interval'] / 60)
                 current_time = start_time
 
                 while current_time <= end_time:
@@ -458,7 +455,6 @@ async def generate_sensor_readings(sensors, hours=24):
                         events_batch = []
 
                     # Увеличиваем время на интервал
-                    current_time += timedelta(minutes=interval_minutes)
 
             # Сохраняем оставшиеся данные в батчах
             if readings_batch:
