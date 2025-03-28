@@ -836,20 +836,6 @@ async def test_websocket_page(request: Request):
     })
 
 
-@app.get("/auth-test")
-async def auth_test(request: Request):
-    """Тестовый эндпоинт для проверки аутентификации"""
-    user = getattr(request.state, "user", None)
-    role = getattr(request.state, "role", None)
-    
-    return {
-        "authenticated": user is not None,
-        "username": user,
-        "role": role,
-        "cookies": {k: "***" for k in request.cookies.keys()}
-    }
-
-
 @app.get("/api/auth-status")
 async def get_auth_status(request: Request):
     """API для проверки состояния аутентификации"""
@@ -864,52 +850,6 @@ async def get_auth_status(request: Request):
         "has_token": bool(token),
         "token_starts_with_bearer": token.startswith("Bearer ") if token else False
     }
-
-
-@app.get("/debug/cookies")
-async def debug_cookies(request: Request):
-    """Отладочный маршрут для проверки cookie"""
-    cookies = request.cookies
-    return {
-        "cookies": cookies,
-        "has_access_token": "access_token" in cookies,
-        "access_token_value": cookies.get("access_token", "не установлен")
-    }
-
-
-@app.get("/debug-token")
-async def debug_token(request: Request, db: AsyncSession = Depends(get_async_session)):
-    """Отладочный маршрут для проверки чтения токена"""
-    try:
-        # Базовая информация
-        raw_token = request.cookies.get('access_token', 'Токен отсутствует')
-
-        # Вызываем функцию проверки пользователя
-        user = await get_current_user_from_cookie(request, db)
-
-        # Пытаемся расшифровать токен вручную
-        token_value = None
-        if raw_token and raw_token.startswith("Bearer "):
-            token_value = raw_token.split("Bearer ")[1]
-
-        manual_decode = None
-        if token_value:
-            try:
-                manual_decode = jwt.decode(token_value, config.SECRET_KEY, algorithms=["HS256"])
-            except Exception as decode_error:
-                manual_decode = f"Ошибка декодирования: {str(decode_error)}"
-
-        return {
-            "raw_token": raw_token,
-            "user_exists": user is not None,
-            "user_details": {
-                "username": getattr(user, 'username', None),
-                "role": getattr(user, 'role', None)
-            } if user else None,
-            "manual_decode": manual_decode
-        }
-    except Exception as e:
-        return {"error": str(e)}
 
 
 # Функция для обработки WebSocket ошибок
