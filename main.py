@@ -11,28 +11,9 @@ from web.app import app
 logger = logging.getLogger(__name__)
 
 
-async def init_db():
-    """Инициализация базы данных"""
-    try:
-        # Создаем таблицы в БД
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            logger.info("База данных инициализирована")
-        
-        # Определяем правильные имена полей
-        from database.field_names import initialize_field_names
-        await initialize_field_names()  # Теперь это синхронная функция
-    except Exception as e:
-        logger.error(f"Ошибка инициализации БД: {e}")
-        raise
-
-
 async def startup():
     """Запуск всех компонентов системы"""
     try:
-        # Инициализация БД
-        await init_db()
-
         # Запуск MQTT клиента
         mqtt_task = asyncio.create_task(mqtt_client())
 

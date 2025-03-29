@@ -23,7 +23,7 @@ MQTT_PASSWORD = ""
 # Конфигурация датчиков, соответствующая init_db.py
 SENSORS = {
     # Датчики линии подготовки сырья
-    "raw_material_temp": {"id": 1, "topic": "pet/raw-material/temperature", "min": 20, "max": 80, "unit": "°C", 
+    "raw_material_temp": {"id": 1, "topic": "pet/raw-material/temperature", "min": 10, "max": 150, "unit": "°C",
                          "name": "Датчик температуры сырья"},
     "raw_material_pressure": {"id": 2, "topic": "pet/raw-material/pressure", "min": 1, "max": 10, "unit": "bar", 
                              "name": "Датчик давления сырья"},

@@ -353,7 +353,7 @@ async def websocket_dashboard(websocket: WebSocket, db: AsyncSession = Depends(g
                 })
             
             # Ждем перед следующим обновлением
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)
             
     except WebSocketDisconnect:
         logger.info("WebSocket клиент отключен от /ws/dashboard")
