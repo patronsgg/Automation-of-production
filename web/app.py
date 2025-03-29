@@ -644,33 +644,29 @@ async def create_test_readings(db: AsyncSession, sensors):
 @app.websocket("/ws/sensors")
 async def websocket_sensors(websocket: WebSocket, db: AsyncSession = Depends(get_async_session)):
     await websocket.accept()
-    try:
-        # Получаем информацию о датчиках
-        query = sa.select(
-            Sensor.id,
-            Sensor.sensor_name,
-            Sensor.sensor_type,
-            Sensor.status,
-            Location.name.label("location_name")
-        ).join(
-            Location, Sensor.location_id == Location.id
-        )
-        
-        result = await db.execute(query)
-        sensors = result.fetchall()
-        
-        # Если датчиков нет, добавляем несколько тестовых
-        if not sensors:
-            logger.warning("Датчики не найдены в базе данных. Создаю тестовые датчики.")
-            await create_test_sensors(db)
+    
+    # Регистрируем соединение в менеджере (как для /ws/alerts)
+    await manager.connect(websocket, "sensors")
+    
+    # Функция генерации данных датчиков
+    async def generate_sensors_data():
+        try:
+            # Получаем информацию о датчиках
+            query = sa.select(
+                Sensor.id,
+                Sensor.sensor_name,
+                Sensor.sensor_type,
+                Sensor.status,
+                Location.name.label("location_name")
+            ).join(
+                Location, Sensor.location_id == Location.id
+            )
             
-            # Повторяем запрос после создания тестовых датчиков
             result = await db.execute(query)
             sensors = result.fetchall()
             
-        sensors_data = []
-        
-        if sensors:
+            sensors_data = []
+            
             for sensor in sensors:
                 # Получаем последние показания для датчика
                 readings_query = sa.select(SensorReading).where(
@@ -693,18 +689,22 @@ async def websocket_sensors(websocket: WebSocket, db: AsyncSession = Depends(get
                 }
                 
                 sensors_data.append(sensor_dict)
-        
-        # Отправляем данные клиенту
-        await websocket.send_json({"sensors": sensors_data})
-        
+                
+            return {"sensors": sensors_data, "timestamp": datetime.now().isoformat()}
+        except Exception as e:
+            logger.error(f"Ошибка получения данных датчиков: {e}")
+            return {"error": str(e)}
+    
+    # Запускаем периодическую отправку данных каждые 2 секунды (вместо 10 как в alerts)
+    task = await manager.start_broadcast_task("sensors", 2, generate_sensors_data)
+    
+    try:
+        # Ждем отключения клиента
+        while True:
+            data = await websocket.receive_text()
+            # Если клиент отправил сообщение, можно обработать его здесь
     except WebSocketDisconnect:
-        logger.info("WebSocket клиент отключен от /ws/sensors")
-    except Exception as e:
-        logger.error(f"Ошибка при отправке данных датчиков: {e}")
-        try:
-            await websocket.send_json({"error": f"Ошибка получения данных датчиков: {str(e)}"})
-        except:
-            pass
+        manager.disconnect(websocket, "sensors")
 
 # Функция для создания тестовых датчиков, если они отсутствуют
 async def create_test_sensors(db: AsyncSession):
